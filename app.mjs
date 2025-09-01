@@ -34,12 +34,14 @@ const yMeta = ydoc.getMap("meta");            // mode, iteration, seededJessica,
 
 // ---------- P2P over P2PT ----------
 let p2p = null;
+// Use secure WebSocket when served via HTTPS, otherwise fall back to ws://
+const WS_PROTO = location.protocol === "https:" ? "wss" : "ws";
 const TRACKERS = [
-  "wss://tracker.openwebtorrent.com",
-  "wss://tracker.fastcast.nz",
-  "wss://tracker.webtorrent.dev",
-  "wss://tracker.files.fm:7073/announce",
-  "wss://tracker.btorrent.xyz/",
+  `${WS_PROTO}://tracker.openwebtorrent.com`,
+  `${WS_PROTO}://tracker.webtorrent.dev`,
+  `${WS_PROTO}://tracker.btorrent.xyz`,
+  `${WS_PROTO}://tracker.fastcast.nz`,
+  `${WS_PROTO}://tracker.files.fm:7073/announce`,
 ];
 const ICE = [{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}];
 const peers = new Map();         // id -> {name?}
@@ -73,11 +75,17 @@ function initP2P(){
 
     p2p.on("trackerconnect", ()=>{ trackersUp = Math.min(TRACKERS.length, trackersUp+1); setStatusChip(); });
     p2p.on("trackerclose",   ()=>{ trackersUp = Math.max(0, trackersUp-1); setStatusChip(); });
+    // Log tracker errors so users understand why peers may not connect
+    p2p.on("trackerwarning", (err)=>{ console.warn("Tracker warning", err); setStatusChip(); });
+
 
     p2p.on("peerconnect", peer=>{
       peers.set(peer.id,{});
       setStatusChip();
 
+
+      // Send initial sync data once the data channel is confirmed open.
+      const sendInitial = ()=>{
       // Wait for the WebRTC data channel to be fully open before
       // attempting to send any messages. Otherwise the initial hello/
       // roster/state messages can be dropped and peers won't sync.
@@ -87,7 +95,11 @@ function initP2P(){
           p2p.send(peer,`ROSTER:${JSON.stringify([myName, ...namesSeen])}`);
           p2p.send(peer,"U:"+u8ToB64(Y.encodeStateAsUpdate(ydoc))); // one-shot full sync
         }catch{}
-      });
+      };
+
+      if(peer.connected) sendInitial();
+      else peer.once("connect", sendInitial);
+
     });
 
     p2p.on("peerclose", peer=>{ peers.delete(peer.id); setStatusChip(); });
