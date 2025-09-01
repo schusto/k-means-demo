@@ -34,12 +34,14 @@ const yMeta = ydoc.getMap("meta");            // mode, iteration, seededJessica,
 
 // ---------- P2P over P2PT ----------
 let p2p = null;
+// Use secure WebSocket when served via HTTPS, otherwise fall back to ws://
+const WS_PROTO = location.protocol === "https:" ? "wss" : "ws";
 const TRACKERS = [
-  "wss://tracker.openwebtorrent.com",
-  "wss://tracker.fastcast.nz",
-  "wss://tracker.webtorrent.dev",
-  "wss://tracker.files.fm:7073/announce",
-  "wss://tracker.btorrent.xyz/",
+  `${WS_PROTO}://tracker.openwebtorrent.com`,
+  `${WS_PROTO}://tracker.webtorrent.dev`,
+  `${WS_PROTO}://tracker.btorrent.xyz`,
+  `${WS_PROTO}://tracker.fastcast.nz`,
+  `${WS_PROTO}://tracker.files.fm:7073/announce`,
 ];
 const ICE = [{urls:"stun:stun.cloudflare.com:3478"},{urls:"stun:stun.l.google.com:19302"}];
 const peers = new Map();         // id -> {name?}
@@ -61,9 +63,9 @@ function renderPresence(){
     const el = document.createElement("div"); el.className="avatar"; el.title=n; el.textContent=initials(n); box.appendChild(el);
   }
 }
-function sendHello(){ try{ if(!p2p) return; for(const peer of p2p.peers.values()) p2p.send(peer,`HELLO:${myName}`);}catch{} }
-function sendRoster(){ try{ if(!p2p) return; const roster=JSON.stringify([myName, ...namesSeen]); for(const peer of p2p.peers.values()) p2p.send(peer,`ROSTER:${roster}`);}catch{} }
-function broadcastUpdate(updateU8){ try{ if(!p2p) return; const payload = "U:" + u8ToB64(updateU8); for(const peer of p2p.peers.values()) p2p.send(peer,payload);}catch{} }
+function sendHello(){ try{ if(!p2p) return; for(const peer of p2p.peers.values()) p2p.send(peer,`HELLO:${myName}`);}catch(e){} }
+function sendRoster(){ try{ if(!p2p) return; const roster=JSON.stringify([myName, ...namesSeen]); for(const peer of p2p.peers.values()) p2p.send(peer,`ROSTER:${roster}`);}catch(e){} }
+function broadcastUpdate(updateU8){ try{ if(!p2p) return; const payload = "U:" + u8ToB64(updateU8); for(const peer of p2p.peers.values()) p2p.send(peer,payload);}catch(e){} }
 
 function initP2P(){
   try{
@@ -73,15 +75,24 @@ function initP2P(){
 
     p2p.on("trackerconnect", ()=>{ trackersUp = Math.min(TRACKERS.length, trackersUp+1); setStatusChip(); });
     p2p.on("trackerclose",   ()=>{ trackersUp = Math.max(0, trackersUp-1); setStatusChip(); });
+    // Log tracker errors so users understand why peers may not connect
+    p2p.on("trackerwarning", (err)=>{ console.warn("Tracker warning", err); setStatusChip(); });
 
     p2p.on("peerconnect", peer=>{
       peers.set(peer.id,{});
       setStatusChip();
-      try{
-        p2p.send(peer,`HELLO:${myName}`);
-        p2p.send(peer,`ROSTER:${JSON.stringify([myName, ...namesSeen])}`);
-        p2p.send(peer,"U:"+u8ToB64(Y.encodeStateAsUpdate(ydoc))); // one-shot full sync
-      }catch{}
+
+      // Send initial sync data once the data channel is confirmed open.
+      const sendInitial = ()=>{
+        try{
+          p2p.send(peer,`HELLO:${myName}`);
+          p2p.send(peer,`ROSTER:${JSON.stringify([myName, ...namesSeen])}`);
+          p2p.send(peer,"U:"+u8ToB64(Y.encodeStateAsUpdate(ydoc))); // one-shot full sync
+        }catch(e){}
+      };
+
+      if(peer.connected) sendInitial();
+      else peer.once("connect", sendInitial);
     });
 
     p2p.on("peerclose", peer=>{ peers.delete(peer.id); setStatusChip(); });
@@ -91,8 +102,8 @@ function initP2P(){
         const s = typeof msg === "string" ? msg : "";
         if(s.startsWith("U:")){ Y.applyUpdate(ydoc, b64ToU8(s.slice(2))); return; }
         if(s.startsWith("HELLO:")){ const name=s.slice(6).trim(); if(name){ const p=peers.get(peer.id)||{}; p.name=name; peers.set(peer.id,p); namesSeen.add(name); renderPresence(); } return; }
-        if(s.startsWith("ROSTER:")){ try{ const list=JSON.parse(s.slice(7)); if(Array.isArray(list)) list.forEach(n=> typeof n==="string" && namesSeen.add(n)); renderPresence(); }catch{} return; }
-      }catch{}
+        if(s.startsWith("ROSTER:")){ try{ const list=JSON.parse(s.slice(7)); if(Array.isArray(list)) list.forEach(n=> typeof n==="string" && namesSeen.add(n)); renderPresence(); }catch(e){} return; }
+      }catch(e){}
     });
 
     p2p.start();
@@ -221,7 +232,7 @@ function hardReset(){
 // ---------- Top controls ----------
 byId("copy").addEventListener("click", async ()=>{
   try{ await navigator.clipboard.writeText(location.href); const b=byId("copy"); b.textContent="Copied!"; setTimeout(()=>b.textContent="Copy link",1200); }
-  catch{ alert("Copy failed. Use the address bar."); }
+  catch(e){ alert("Copy failed. Use the address bar."); }
 });
 byId("populate").addEventListener("click", populateTestData);
 byId("addCentroid").addEventListener("click",()=>{ const i=/** @type {HTMLInputElement} */(byId("centroidName")); addCentroid(i.value.trim()); i.value=""; });
