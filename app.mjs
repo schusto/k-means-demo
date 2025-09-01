@@ -78,12 +78,18 @@ function initP2P(){
     // Log tracker errors so users understand why peers may not connect
     p2p.on("trackerwarning", (err)=>{ console.warn("Tracker warning", err); setStatusChip(); });
 
+
     p2p.on("peerconnect", peer=>{
       peers.set(peer.id,{});
       setStatusChip();
 
+
       // Send initial sync data once the data channel is confirmed open.
       const sendInitial = ()=>{
+      // Wait for the WebRTC data channel to be fully open before
+      // attempting to send any messages. Otherwise the initial hello/
+      // roster/state messages can be dropped and peers won't sync.
+      peer.on("connect", ()=>{
         try{
           p2p.send(peer,`HELLO:${myName}`);
           p2p.send(peer,`ROSTER:${JSON.stringify([myName, ...namesSeen])}`);
@@ -93,6 +99,7 @@ function initP2P(){
 
       if(peer.connected) sendInitial();
       else peer.once("connect", sendInitial);
+
     });
 
     p2p.on("peerclose", peer=>{ peers.delete(peer.id); setStatusChip(); });
