@@ -77,11 +77,18 @@ function initP2P(){
     p2p.on("peerconnect", peer=>{
       peers.set(peer.id,{});
       setStatusChip();
-      try{
-        p2p.send(peer,`HELLO:${myName}`);
-        p2p.send(peer,`ROSTER:${JSON.stringify([myName, ...namesSeen])}`);
-        p2p.send(peer,"U:"+u8ToB64(Y.encodeStateAsUpdate(ydoc))); // one-shot full sync
-      }catch{}
+
+      // Send initial sync data once the data channel is confirmed open.
+      const sendInitial = ()=>{
+        try{
+          p2p.send(peer,`HELLO:${myName}`);
+          p2p.send(peer,`ROSTER:${JSON.stringify([myName, ...namesSeen])}`);
+          p2p.send(peer,"U:"+u8ToB64(Y.encodeStateAsUpdate(ydoc))); // one-shot full sync
+        }catch{}
+      };
+
+      if(peer.connected) sendInitial();
+      else peer.once("connect", sendInitial);
     });
 
     p2p.on("peerclose", peer=>{ peers.delete(peer.id); setStatusChip(); });
