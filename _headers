@@ -1,0 +1,21 @@
+/*
+  Content-Security-Policy:
+    default-src 'none';
+    script-src 'self' https://esm.sh https://cdn.jsdelivr.net;
+    script-src-elem 'self' https://esm.sh https://cdn.jsdelivr.net;
+    script-src-attr 'none';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data:;
+    connect-src 'self'
+      wss://tracker.openwebtorrent.com
+      wss://tracker.fastcast.nz
+      wss://tracker.webtorrent.dev
+      wss://tracker.files.fm:7073
+      wss://tracker.btorrent.xyz
+      stun:;
+    base-uri 'none';
+    frame-ancestors 'none'
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY

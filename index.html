@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manual k-Means — Ice-Cream (P2P)</title>
+
+  <!-- Data-URL favicon to avoid 404s -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>">
+
+  <!-- P2PT (UMD global: window.P2PT) -->
+  <script src="https://cdn.jsdelivr.net/gh/subins2000/p2pt/dist/p2pt.umd.min.js" defer></script>
+
+  <style>
+    :root {
+      --bg:#0b0c10; --panel:#11131a; --muted:#8a8f98; --text:#e7e9ee; --border:#232734;
+      --accent:#5b8cff; --danger:#cc3b3b;
+      --gap:12px; --radius:16px; --shadow:0 6px 18px rgba(0,0,0,.25);
+    }
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#0b0c10 0%,#0b0c10 40%,#0e1016 100%);color:var(--text);line-height:1.35}
+    .container{max-width:1200px;margin:0 auto;padding:16px;display:grid;gap:var(--gap)}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:12px;box-shadow:var(--shadow)}
+    .row{display:flex;flex-wrap:wrap;gap:var(--gap);align-items:center}
+    .btn{appearance:none;border:1px solid var(--border);background:#151823;color:var(--text);border-radius:999px;padding:10px 14px;cursor:pointer;font-weight:600}
+    .btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+    .btn.danger{background:#2a1216;border-color:#4b1a21;color:#ffb3bf}
+    .btn.ghost{background:transparent}
+    .btn:active{transform:translateY(1px)}
+    input,select{background:#0f121a;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 12px;min-width:0}
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+    .chip{border-radius:999px;padding:6px 10px;font-weight:700;font-size:13px;border:1px solid var(--border);background:#151823;color:#muted;display:inline-flex;gap:6px;align-items:center}
+    .chip.ok{background:#152018;color:#b9ffcc;border-color:#264d2e}
+    .chip.warn{background:#201a12;color:#ffe9a2;border-color:#4d3f1a}
+    #presence{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .avatar{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);display:grid;place-items:center;font-size:12px;font-weight:800;background:#1b1f2b}
+
+    .board{display:grid;gap:var(--gap);grid-template-columns:1fr}
+    @media (min-width:860px){ .board{grid-template-columns:1fr 320px} }
+
+    /* Canvas */
+    #canvas{display:grid;gap:var(--gap);grid-template-columns:repeat(auto-fit,minmax(240px,1fr));grid-auto-rows:1fr;align-items:stretch;padding:8px;border-radius:var(--radius);background:#0f121a;border:1px dashed #2a2f3d;min-height:200px}
+    .centroid{position:relative;min-height:220px;border-radius:14px;outline:2px dashed rgba(255,255,255,.08);background:#10131a;padding:8px 8px 12px}
+    .centroid.drop-target{outline-color:rgba(255,255,255,.25)}
+    .centroid .head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+    .centroid .name-row{display:flex;gap:8px;align-items:center;min-width:0}
+    .color{width:16px;height:16px;border-radius:4px;border:1px solid rgba(0,0,0,.3)}
+    .centroid input.name{flex:1;min-width:80px;background:#0f121a;border-radius:8px;border:1px solid var(--border);color:var(--text);padding:6px 8px}
+    .hint{font-size:12px;color:var(--muted)}
+
+    .card{background:#171a22;border:1px solid var(--border);border-radius:12px;padding:10px;display:grid;gap:8px;box-shadow:var(--shadow)}
+    .card .title{font-weight:800}
+    .muted{color:var(--muted)}
+    .card.dragging{opacity:.6;transform:scale(.98)}
+    .card.float{position:absolute;width:180px;max-width:calc(100% - 16px);cursor:grab;touch-action:none}
+
+    #unassigned{min-height:220px;border:1px dashed #2a2f3d;border-radius:12px;padding:10px;background:var(--panel);display:grid;gap:8px}
+
+    /* Dashboard */
+    #kmeans{display:grid;gap:8px}
+    .km-metrics{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .kmrow{display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden}
+    .kmrow .bar{flex:1;min-width:120px;height:8px;border-radius:999px;border:1px solid var(--border);background:#0f121a;overflow:hidden}
+    .kmrow .fill{height:100%}
+    .traits-inline{flex:2;min-width:120px;overflow:hidden;text-overflow:ellipsis;opacity:.9;font-size:12px}
+    .suggest-inline{flex-shrink:0;font-size:12px;color:#cfeaff}
+    .delta{font-size:12px;color:#9fb4ff}.delta.bad{color:#ffb3bf}
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="panel" style="display:grid;gap:10px">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <div id="room" class="chip">Room: ----</div>
+          <button id="copy" class="btn">Copy link</button>
+          <button id="populate" class="btn">Populate test data</button>
+        </div>
+        <div class="row">
+          <div id="status" class="chip warn">Peers: 0</div>
+          <div id="presence"></div>
+        </div>
+      </div>
+
+      <div class="row" style="gap:14px">
+        <div>
+          <label for="name">Your name</label>
+          <div class="row">
+            <input id="name" placeholder="e.g., Alex" />
+            <button id="saveName" class="btn">Save</button>
+          </div>
+        </div>
+
+        <div>
+          <label for="centroidName">Add centroid (max 3)</label>
+          <div class="row">
+            <input id="centroidName" placeholder="e.g., Citrus" />
+            <button id="addCentroid" class="btn">Add</button>
+          </div>
+        </div>
+
+        <div style="flex:1"></div>
+
+        <div class="row">
+          <button id="coin" class="btn ghost">Coin flip</button>
+          <button id="d12" class="btn ghost">d12</button>
+          <button id="shuffle" class="btn ghost">Shuffle names</button>
+          <button id="shuffleUnassigned" class="btn">Randomize Unassigned</button>
+          <button id="restartAll" class="btn danger">Restart (Unassign All)</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div style="flex:1">
+          <label>New Vote</label>
+          <div class="row">
+            <input id="flavorTitle" placeholder="Customer name" />
+            <input id="traitA" placeholder="Trait One (e.g., Fresh)" />
+            <input id="traitB" placeholder="Trait Two (e.g., Sorbet)" />
+            <button id="addCard" class="btn primary">Add</button>
+          </div>
+        </div>
+        <div class="row">
+          <select id="mode" title="Mode">
+            <option value="learn">learn</option><option value="playtest">playtest</option><option value="custom">custom</option>
+          </select>
+          <input id="iter" type="number" min="0" step="1" value="0" style="width:100px" title="Iteration" />
+          <button id="export" class="btn">Export JSON</button>
+          <input id="import" type="file" accept="application/json" />
+          <button id="reset" class="btn danger">Reset</button>
+        </div>
+      </div>
+
+      <details>
+        <summary>How it works (quick)</summary>
+        <ul>
+          <li>Add up to <b>3 centroids</b>. They appear below as sections on the canvas.</li>
+          <li>Drag cards from <b>Unassigned</b> onto a centroid; they stay where you drop them.</li>
+          <li>Drag within/across sections to reposition/reassign. Drop back on Unassigned to unassign.</li>
+          <li><b>Restart</b> moves all cards back to Unassigned. <b>Reset</b> clears and re-seeds “Jessica”.</li>
+        </ul>
+      </details>
+
+      <div id="kmeans" aria-label="k-means dashboard"></div>
+    </header>
+
+    <section class="board">
+      <div id="canvas" class="panel"></div>
+      <div class="panel">
+        <h2 style="margin:6px 0 10px 0;font-size:16px;color:var(--muted)">Unassigned</h2>
+        <div id="unassigned"></div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>
